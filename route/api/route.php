@@ -167,6 +167,11 @@ Route::group(function () {
     Route::post('service/pay/:order_id', 'community.SocialServiceController/pay')->name('servicePay');
     Route::get('service/order/list', 'community.SocialServiceController/orderList')->name('orderList');
 
+    Route::get('user/mark', 'user.UserController/mark')->name('markInfo');
+    Route::post('user/mark/pick', 'user.UserController/markPick')->name('markPick');
+    Route::post('user/extend', 'user.UserController/extendInfo')->name('extendInfo');
+    Route::post('user/report', 'user.UserController/report')->name('userReport');
+
 })->middleware(\app\http\middleware\AllowOriginMiddleware::class)->middleware(\app\http\middleware\AuthTokenMiddleware::class, true);
 //未授权接口
 Route::group(function () {

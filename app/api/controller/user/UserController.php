@@ -3,7 +3,10 @@
 namespace app\api\controller\user;
 
 use app\http\validates\user\AddressValidate;
+use app\http\validates\user\RegisterValidates;
 use app\models\system\SystemCity;
+use app\models\user\UserReport;
+use crmeb\services\SystemConfigService;
 use think\exception\ValidateException;
 use app\Request;
 use app\models\user\UserLevel;
@@ -19,7 +22,6 @@ use app\models\user\UserAddress;
 use app\models\user\UserBill;
 use app\models\user\UserExtract;
 use app\models\user\UserNotice;
-use crmeb\services\GroupDataService;
 use crmeb\services\UtilService;
 
 /**
@@ -154,17 +156,10 @@ class UserController
             $user['switchUserInfo'][] = $request->user();
         }
 
-        // 健康状况，
-        $user['health'] = array();
-        // 服务期望，
-        $user['expect'] = array();
-        // 日常生活，
-        $user['daily'] = array();
-        // 业余生活，
-        $user['work'] = array();
-        // 特长爱好
-        $user['hobby'] = array();
-
+        $user['user_after'] = is_null($user['user_after']) ? '' : implode(',', json_decode($user['user_after'], true));
+        $user['user_daily'] = is_null($user['user_daily']) ? '' : implode(',', json_decode($user['user_daily'], true));
+        $user['user_except'] = is_null($user['user_except']) ? '' : implode(',', json_decode($user['user_except'], true));
+        $user['user_health'] = is_null($user['user_health']) ? '' : implode(',', json_decode($user['user_health'], true));
         return app('json')->successful($user);
     }
 
@@ -606,4 +601,124 @@ class UserController
 
     }
 
+    public function mark(Request $request)
+    {
+        $uid = $request->uid();
+        list($field) = UtilService::postMore([
+            ['field', ''],
+        ], $request, true);
+
+        if(!in_array($field, array(
+            'user_health',
+            'user_daily',
+            'user_after',
+            'user_except',
+        ))) return app('json')->fail('参数错误');
+
+        $conf = SystemConfigService::get($field);
+        $data = json_decode($conf, true) ?: array();
+        if (!empty($data)) {
+            $userObject = User::where('uid', $uid)->find();
+            if (!empty($userObject->$field)) {
+                $picked = json_decode($userObject->$field, true);
+            } else {
+                $picked = array();
+            }
+            foreach ($data as $k => $item) {
+                $data[$k] = array(
+                    'value' => in_array($item, $picked) ? true : false,
+                    'key' => $item,
+                );
+                if ($field == 'user_health' && !empty($picked) && $item == '有病史') {
+                    $data[$k]['value'] = $picked[0];
+                }
+                unset($item);
+            }
+        }
+        return app('json')->success($data);
+    }
+
+    public function markPick(Request $request)
+    {
+        list($field, $value) = UtilService::postMore([
+            ['field', ''],
+            ['value', ''],
+        ], $request, true);
+
+        if(!in_array($field, array(
+            'user_health',
+            'user_daily',
+            'user_after',
+            'user_except',
+        ))) return app('json')->fail('参数错误');
+
+        if ($field && $value) {
+            $uid = $request->uid();
+            User::where('uid', $uid)->update(array(
+                $field => json_encode($value, JSON_UNESCAPED_UNICODE)
+            ));
+        }
+        return app('json')->success();
+    }
+
+    public function extendInfo(Request $request)
+    {
+        list($realName, $sex, $userHobby) = UtilService::postMore([
+            ['real_name', ''],
+            ['sex', ''],
+            ['user_hobby', ''],
+        ], $request, true);
+
+        $uid = $request->uid();
+        if (!empty($realName)) {
+            $extension['real_name'] = $realName;
+        }
+        if (!empty($sex) && in_array($sex, array('男', '女'))) {
+            $extension['sex'] = $sex;
+        }
+        if (!empty($user_hobby)) {
+            $extension['user_hobby'] = $userHobby;
+        }
+        if (!empty($extension)) {
+            User::where('uid', $uid)->update($extension);
+        }
+        return app('json')->success();
+    }
+
+    public function report(Request $request)
+    {
+        list($name, $phone, $remark, $picture) = UtilService::postMore([
+            ['name', ''],
+            ['phone', ''],
+            ['remark', ''],
+            ['picture', ''],
+        ], $request, true);
+        if (empty($name)) {
+            return app('json')->fail('请填写要投诉社工的姓名');
+        }
+        //验证手机号
+        try {
+            validate(RegisterValidates::class)->scene('code')->check(['phone' => $phone]);
+        } catch (ValidateException $e) {
+            return app('json')->fail($e->getError());
+        }
+        if (empty($remark)) {
+            return app('json')->fail('请填写投诉事件');
+        }
+        if (empty($picture)) {
+            return app('json')->fail('请上传图片');
+        }
+        $uid = $request->uid();
+        UserReport::insert(
+            array(
+                'uid' => $uid,
+                'name' => $name,
+                'phone' => $phone,
+                'remark' => $remark,
+                'picture' => $picture,
+                'add_time' => date('Y-m-d H:i:s'),
+            )
+        );
+        return app('json')->success();
+    }
 }
