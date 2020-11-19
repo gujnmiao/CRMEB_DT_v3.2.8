@@ -55,6 +55,10 @@ class SocialServiceController
                 $item['state'] = 0;
             }
             unset($item['left_num']);
+            if (!is_null($item['limit_time'])) {
+                $item['limit_time'] = date('Y-m-d', strtotime($item['limit_time']));
+            }
+
         }
         return app('json')->successful($list);
     }
@@ -99,6 +103,11 @@ class SocialServiceController
             // 报名中
             $socialService['state'] = 0;
         }
+        if (!is_null($socialService['limit_time'])) {
+            $socialService['limit_time'] = date('Y-m-d', strtotime($socialService['limit_time']));
+        }
+        $socialService['start_time'] = date('Y-m-d', strtotime($socialService['start_time']));
+        $socialService['end_time'] = date('Y-m-d', strtotime($socialService['end_time']));
         $uid = $request->uid();
         $orderId = null;
         if (!empty($uid)) {
@@ -144,8 +153,8 @@ class SocialServiceController
         $orderId = $order['order_id'];
         if ($orderId) {
             $info['order_id'] = $orderId;
-            $orderInfo = ServiceOrder::where('order_id', $orderId)->find();
-            if (!$orderInfo || !isset($orderInfo['paid'])) return app('json')->fail('支付订单不存在!');
+            $orderInfo = ServiceOrder::where('order_id', $orderId)->where('uid', $uid)->find();
+            if (!$orderInfo) return app('json')->fail('支付订单不存在!');
             $orderInfo = $orderInfo->toArray();
             if ($orderInfo['status'] !== 0) return app('json')->fail('该订单状态不能支付!');
             if (bcsub((float)$orderInfo['pay_price'], 0, 2) <= 0) {
@@ -190,14 +199,17 @@ class SocialServiceController
     public function order(Request $request, $orderId)
     {
         $uid = $request->uid();
-        $field = "order_id,service_info,real_name,user_phone,pay_price,status,pay_type,add_time";
+        $field = "order_id,service_info,real_name,user_phone,pay_price,status,pay_type,add_time,verify_code";
         $orderInfo = ServiceOrder::where(array(
             'uid' => $uid, 'order_id' => $orderId
-        ))->find()->toArray();
+        ))->field($field)->find();
         if (empty($orderInfo)) {
             return app('json')->fail('订单不存在!');
         }
+        $orderInfo = $orderInfo->toArray();
         $orderInfo['service_info'] = json_decode($orderInfo['service_info'],true);
+        $orderInfo['service_info']['start_time'] = date('Y-m-d', strtotime($orderInfo['service_info']['start_time']));
+        $orderInfo['service_info']['end_time'] = date('Y-m-d', strtotime($orderInfo['service_info']['end_time']));
         return app('json')->successful($orderInfo);
     }
 
@@ -211,78 +223,25 @@ class SocialServiceController
         $list = ServiceOrder::getOrderList($data, $uid);
         foreach ($list as &$item) {
             $item['service_info'] = json_decode($item['service_info'], true);
+            $item['service_info']['start_time'] = date('Y-m-d', strtotime($item['service_info']['start_time']));
+            $item['service_info']['end_time'] = date('Y-m-d', strtotime($item['service_info']['end_time']));
         }
         return app('json')->successful($list);
     }
 
     public function pay(Request $request, $orderId)
     {
-        list($uni, $paytype, $from) = UtilService::postMore([
-            ['uni', ''],
-            ['paytype', 'weixin'],
-            ['from', 'weixin']
-        ], $request, true);
-        if (!$uni) return app('json')->fail('参数错误!');
-        $order = StoreOrder::getUserOrderDetail($request->uid(), $uni);
-        if (!$order)
-            return app('json')->fail('订单不存在!');
-        if ($order['paid'])
-            return app('json')->fail('该订单已支付!');
-        if ($order['pink_id']){
-            $cache_pink = Cache::get(md5('store_pink_'.$order['pink_id']));
-            if(StorePink::isPinkStatus($order['pink_id'])  || ($cache_pink && bcsub($cache_pink['people'], $cache_pink['now_people'], 0) <= 0)){
-                return app('json')->fail('该订单已失效!');
-            }
+        $uid = $request->uid();
+        $orderInfo = ServiceOrder::where('order_id', $orderId)->where('uid', $uid)->find();
+        if (!$orderInfo) return app('json')->fail('支付订单不存在!');
+        $orderInfo = $orderInfo->toArray();
+        if ($orderInfo['status'] !== 0) return app('json')->fail('该订单状态不能支付!');
+        try {
+            $jsConfig = ServiceOrderRepository::jsPay($orderId); //创建订单jspay
+        } catch (\Exception $e) {
+            return app('json')->status('pay_error', $e->getMessage(), array('order_id' => $orderInfo['order_id']));
         }
-        if ($from == 'weixin') {//0
-            if (in_array($order->is_channel, [1, 2]))
-                $order['order_id'] = mt_rand(100, 999) . '_' . $order['order_id'];
-        }
-        if ($from == 'weixinh5') {//2
-            if (in_array($order->is_channel, [0, 1]))
-                $order['order_id'] = mt_rand(100, 999) . '_' . $order['order_id'];
-        }
-        if ($from == 'routine') {//1
-            if (in_array($order->is_channel, [0, 2]))
-                $order['order_id'] = mt_rand(100, 999) . '_' . $order['order_id'];
-        }
-
-        $order['pay_type'] = $paytype; //重新支付选择支付方式
-        switch ($order['pay_type']) {
-            case 'weixin':
-                try {
-                    if ($from == 'routine') {
-                        $jsConfig = OrderRepository::jsPay($order); //订单列表发起支付
-                    } else if ($from == 'weixinh5') {
-                        $jsConfig = OrderRepository::h5Pay($order);
-                    } else {
-                        $jsConfig = OrderRepository::wxPay($order);
-                    }
-                } catch (\Exception $e) {
-                    return app('json')->fail($e->getMessage());
-                }
-                if ($from == 'weixinh5') {
-                    return app('json')->status('wechat_h5_pay', ['jsConfig' => $jsConfig, 'order_id' => $order['order_id']]);
-                } else {
-                    return app('json')->status('wechat_pay', ['jsConfig' => $jsConfig, 'order_id' => $order['order_id']]);
-                }
-                break;
-            case 'yue':
-                if (StoreOrder::yuePay($order['order_id'], $request->uid()))
-                    return app('json')->status('success', '余额支付成功');
-                else {
-                    $error = StoreOrder::getErrorInfo();
-                    return app('json')->fail(is_array($error) && isset($error['msg']) ? $error['msg'] : $error);
-                }
-                break;
-            case 'offline':
-                StoreOrder::createOrderTemplate($order);
-                if (StoreOrder::setOrderTypePayOffline($order['order_id']))
-                    return app('json')->status('success', '订单创建成功');
-                else
-                    return app('json')->status('success', '支付失败');
-                break;
-        }
-        return app('json')->fail('支付方式错误');
+        $info['jsConfig'] = $jsConfig;
+        return app('json')->status('wechat_pay', ['jsConfig' => $jsConfig, 'order_id' => $orderInfo['order_id']]);
     }
 }

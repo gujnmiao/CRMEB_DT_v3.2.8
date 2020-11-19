@@ -33,7 +33,7 @@ class ServiceOrderRepository
             $orderInfo = ServiceOrder::where($field, $orderId)->find();
         else
             $orderInfo = $orderId;
-        if (!$orderInfo || !isset($orderInfo['paid'])) exception('支付订单不存在!');
+        if (!$orderInfo) exception('支付订单不存在!');
         if ($orderInfo['paid']) exception('支付已支付!');
         if ($orderInfo['total_price'] <= 0) exception('该支付无需支付!');
         $openid = WechatUser::getOpenId($orderInfo['uid']);

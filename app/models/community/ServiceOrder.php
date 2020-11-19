@@ -85,6 +85,7 @@ class ServiceOrder extends BaseModel
                 'real_name' => $name,
                 'user_phone' => $phone,
                 'total_price' => $totalPrice,
+                'pay_price' => $totalPrice,
                 'status' => 0,
                 'pay_type' => 'weixin',
                 'add_time' => date('Y-m-d H:i:s'),
