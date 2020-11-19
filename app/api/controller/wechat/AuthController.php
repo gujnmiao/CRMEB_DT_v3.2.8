@@ -35,8 +35,6 @@ class AuthController
      */
     public function mp_auth(Request $request)
     {
-        $userInfo = User::where('uid', 3)->find();
-        $token = UserToken::createToken($userInfo, 'routine');dump($token);exit;
         $cache_key = '';
         list($code, $post_cache_key, $login_type) = UtilService::postMore([
             ['code', ''],

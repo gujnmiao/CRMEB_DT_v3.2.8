@@ -154,6 +154,17 @@ class UserController
             $user['switchUserInfo'][] = $request->user();
         }
 
+        // 健康状况，
+        $user['health'] = array();
+        // 服务期望，
+        $user['expect'] = array();
+        // 日常生活，
+        $user['daily'] = array();
+        // 业余生活，
+        $user['work'] = array();
+        // 特长爱好
+        $user['hobby'] = array();
+
         return app('json')->successful($user);
     }
 
